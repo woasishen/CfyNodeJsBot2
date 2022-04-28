@@ -67,6 +67,12 @@ server.post('/api/messages', (req, res) => {
     });
 });
 
+adapter.useNamedPipe(async (context) => {
+    await myBot.run(context);
+    },
+    process.env.APPSETTING_WEBSITE_SITE_NAME + '.directline'
+);
+
 // Listen for Upgrade requests for Streaming.
 server.on('upgrade', (req, socket, head) => {
     // Create an adapter scoped to this WebSocket connection to allow storing session data.
