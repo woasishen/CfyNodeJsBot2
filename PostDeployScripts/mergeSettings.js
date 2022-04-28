@@ -1,102 +1,69 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-
+const fs = require('fs');
 const path = require('path');
+const appSettingPath = path.resolve('./appsettings.json');
+const envPath = path.resolve('./.env');
 
-const dotenv = require('dotenv');
-// Import required bot configuration.
-const ENV_FILE = path.join(__dirname, '.env');
-dotenv.config({ path: ENV_FILE });
+const settings = readSettingsFile(appSettingPath, envPath);
+const env = process.env;
 
-const restify = require('restify');
+const envNames = Object.keys(env)
+    .filter(function(x){ return x.indexOf("APPSETTING_") === 0;})
+    .filter(function(x){ return x.indexOf("APPSETTING_WEBSITE_") < 0; });
+const appSettings = envNames.reduce(function(cur, key) { return {...cur, [key.substring(11)]: env[key]};}, {});
 
-// Import required bot services.
-// See https://aka.ms/bot-services to learn more about the different parts of a bot.
-const { BotFrameworkAdapter } = require('botbuilder');
+const newSettings = {...settings, ...appSettings};
 
-// This bot's main dialog.
-const { EchoBot } = require('./bot');
+updateSettingsFile(appSettingPath, envPath, newSettings);
 
-// Create HTTP server
-const server = restify.createServer();
-server.listen(process.env.port || process.env.PORT || 3978, () => {
-    console.log(`\n${ server.name } listening to ${ server.url }`);
-    console.log('\nGet Bot Framework Emulator: https://aka.ms/botframework-emulator');
-    console.log('\nTo talk to your bot, open the emulator select "Open Bot"');
-});
+function readDotEnv(file) {
+    const text = fs.readFileSync(file, 'utf-8');
+    const lines = text.split(/[\r\n]/);
+    const settings = lines.reduce(function(cur, line) {
+        const parts = line.split('=');
+        if (parts.length >= 2) {
+            const name = parts.splice(0, 1);
+            cur[name] = parts.join('=');
+        }
+        return cur;
+    }, {});
 
-// Create adapter.
-// See https://aka.ms/about-bot-adapter to learn more about how bots work.
-const adapter = new BotFrameworkAdapter({
-    appId: process.env.MicrosoftAppId,
-    appPassword: process.env.MicrosoftAppPassword,
-    channelService: process.env.ChannelService,
-    openIdMetadata: process.env.BotOpenIdMetadata
-});
+    return settings;
+}
 
-// Catch-all for errors.
-const onTurnErrorHandler = async (context, error) => {
-    // This check writes out errors to console log .vs. app insights.
-    // NOTE: In production environment, you should consider logging this to Azure
-    //       application insights.
-    console.error(`\n [onTurnError] unhandled error: ${ error }`);
+function readSettingsFile(appSettingPath, envPath) {
+    if (fs.existsSync(appSettingPath)) {
+        return JSON.parse(fs.readFileSync(appSettingPath, 'utf-8'));
+    }
 
-    // Send a trace activity, which will be displayed in Bot Framework Emulator
-    await context.sendTraceActivity(
-        'OnTurnError Trace',
-        `${ error }`,
-        'https://www.botframework.com/schemas/error',
-        'TurnError'
-    );
+    if (fs.existsSync(envPath)) {
+        return readDotEnv(envPath);
+    }
 
-    // Send a message to the user
-    await context.sendActivity('The bot encountered an error or bug.');
-    await context.sendActivity('To continue to run this bot, please fix the bot source code.');
-};
+    return {};
+}
 
-// Set the onTurnError for the singleton BotFrameworkAdapter.
-adapter.onTurnError = onTurnErrorHandler;
+function isNodeJSProject() {
+    return fs.existsSync(path.resolve('./iisnode.yml'));
+}
 
-// Create the main dialog.
-const myBot = new EchoBot();
-
-// Listen for incoming requests.
-server.post('/api/messages', (req, res) => {
-    adapter.processActivity(req, res, async (context) => {
-        // Route to main dialog.
-        await myBot.run(context);
-    });
-});
-
-adapter.useNamedPipe(async (context) => {
-    await myBot.run(context);
-    },
-    process.env.APPSETTING_WEBSITE_SITE_NAME + '.directline'
-);
-
-// Listen for Upgrade requests for Streaming.
-server.on('upgrade', (req, socket, head) => {
-    // Create an adapter scoped to this WebSocket connection to allow storing session data.
-    const streamingAdapter = new BotFrameworkAdapter({
-        appId: process.env.MicrosoftAppId,
-        appPassword: process.env.MicrosoftAppPassword
-    });
-    // Set onTurnError for the BotFrameworkAdapter created for each connection.
-    streamingAdapter.onTurnError = onTurnErrorHandler;
-
-    streamingAdapter.useWebSocket(req, socket, head, async (context) => {
-        // After connecting via WebSocket, run this logic for every request sent over
-        // the WebSocket connection.
-        await myBot.run(context);
-    });
-});
+function updateSettingsFile(appSettingPath, envPath, settings) {
+    if (isNodeJSProject()) {
+        const keys = Object.keys(settings);
+        const lines = keys.reduce(function(cur, key) {
+            return [...cur, key + '=' + settings[key]];
+        }, []);
+        fs.writeFileSync(envPath, lines.join('\n'), {encoding: 'utf-8'});
+    } else {
+        fs.writeFileSync(appSettingPath, JSON.stringify(settings, null, 2), {encoding: 'utf-8'});
+    }
+}
 
 // SIG // Begin signature block
 // SIG // MIInJwYJKoZIhvcNAQcCoIInGDCCJxQCAQExDzANBglg
 // SIG // hkgBZQMEAgEFADB3BgorBgEEAYI3AgEEoGkwZzAyBgor
 // SIG // BgEEAYI3AgEeMCQCAQEEEBDgyQbOONQRoqMAEEvTUJAC
 // SIG // AQACAQACAQACAQACAQAwMTANBglghkgBZQMEAgEFAAQg
-// SIG // tcIN0SnlYU4WNSw0xazixGVcg74+1B1VRGmGEIt6dumg
+// SIG // ABXngb6XfFVrkpPEfinEWsWVGwpaJVzPO8g3ChQgKQag
 // SIG // ghFlMIIIdzCCB1+gAwIBAgITNgAAATl4xjn15Xcn6gAB
 // SIG // AAABOTANBgkqhkiG9w0BAQsFADBBMRMwEQYKCZImiZPy
 // SIG // LGQBGRYDR0JMMRMwEQYKCZImiZPyLGQBGRYDQU1FMRUw
@@ -237,24 +204,24 @@ server.on('upgrade', (req, socket, head) => {
 // SIG // AxMMQU1FIENTIENBIDAxAhM2AAABOXjGOfXldyfqAAEA
 // SIG // AAE5MA0GCWCGSAFlAwQCAQUAoIGuMBkGCSqGSIb3DQEJ
 // SIG // AzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAM
-// SIG // BgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBGdRPI
-// SIG // vy6tJrWTxz7wvdvvUw49NVqyW0Db/0p/AluC4zBCBgor
+// SIG // BgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDWm4EA
+// SIG // RSo+ZPKSsCxDthXWfIrN+1cGCPl5wJbDX61Z+DBCBgor
 // SIG // BgEEAYI3AgEMMTQwMqAUgBIATQBpAGMAcgBvAHMAbwBm
 // SIG // AHShGoAYaHR0cDovL3d3dy5taWNyb3NvZnQuY29tMA0G
-// SIG // CSqGSIb3DQEBAQUABIIBAEH/deoMbA5FR76NgJ+/SJob
-// SIG // 8tG3laByWGdS1n3N67NpOJt04d8ZOzH0FY9QaSR5U/r9
-// SIG // 4Vkm6YFvRyX04gaiE4jMC6UF0DefKbMx8vfzOhf8+feE
-// SIG // a9xk3XrrnwC3AGbNqQSkVepINk72gadu9pMmQg4zdr/0
-// SIG // 2R3WjCrlrTyJQO0ReUgzUnhh2aEeQ1nI1jh0sQ0bgSpj
-// SIG // OFOrGLScchfpPhJc2ocffb9jbvoqzZWmNfXYeUpEGIT6
-// SIG // Zj0522ByyB1NH3HzAa7mVAmZkkgCIdfN+r45JNCLUnyk
-// SIG // EAGjg/3SrI8TuEdbFwtNgYnlstplT80OWz7LBBg7F7ps
-// SIG // rRK/RGiFfuuhghLiMIIS3gYKKwYBBAGCNwMDATGCEs4w
+// SIG // CSqGSIb3DQEBAQUABIIBAKaUj4h+s6Q0wA1SB/MOfp/r
+// SIG // gjf31KnbahkWHTzPQart+QTTAFcUlQb71j7U0268v3SO
+// SIG // 9IPG3spflU6WR6X2d2xZ+ocJBj9hs52DXHgOsP+98weB
+// SIG // 1qFo+K6eeNbG9FD6UHwmh/3BDxE/DzbmpJq/kVrKb95n
+// SIG // sksXllPlbwnDguNtvJXhrf+ll1MWuPxegAOekg8QFt4Q
+// SIG // ANifKmnWUOCd6Y1DxZguXlI4eY2GIAdx41OLq0WZe1wd
+// SIG // QSLAl9bwnvR9w1AISk5iIpvkWSJUFj4oL83fo/tSDuYT
+// SIG // x3iIUBd073SibjmAFdrM/woumnHYFr51TWJT9oC9EM3B
+// SIG // +W3G/NG8NTqhghLiMIIS3gYKKwYBBAGCNwMDATGCEs4w
 // SIG // ghLKBgkqhkiG9w0BBwKgghK7MIIStwIBAzEPMA0GCWCG
 // SIG // SAFlAwQCAQUAMIIBUQYLKoZIhvcNAQkQAQSgggFABIIB
 // SIG // PDCCATgCAQEGCisGAQQBhFkKAwEwMTANBglghkgBZQME
-// SIG // AgEFAAQgtz/hPI3phh8wuNITBlQKsMWy4ZECbQQGutdV
-// SIG // RLNG6vsCBmCuV88RXBgTMjAyMTA2MTUyMjQwNTUuOTU4
+// SIG // AgEFAAQgsxCKBzj99wLPx+a5kOy8t4vE+BcziFkPKz54
+// SIG // efxIRgkCBmCuV88RRRgTMjAyMTA2MTUyMjQwNTUuNzE0
 // SIG // WjAEgAIB9KCB0KSBzTCByjELMAkGA1UEBhMCVVMxEzAR
 // SIG // BgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1v
 // SIG // bmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlv
@@ -378,8 +345,8 @@ server.on('upgrade', (req, socket, head) => {
 // SIG // aW9uMSYwJAYDVQQDEx1NaWNyb3NvZnQgVGltZS1TdGFt
 // SIG // cCBQQ0EgMjAxMAITMwAAAUedj/Hm3jGDWQAAAAABRzAN
 // SIG // BglghkgBZQMEAgEFAKCCAUowGgYJKoZIhvcNAQkDMQ0G
-// SIG // CyqGSIb3DQEJEAEEMC8GCSqGSIb3DQEJBDEiBCAp7juE
-// SIG // fpfsZBrQNmJahY8RLTl1tUNl77+rQsjnMBn2LTCB+gYL
+// SIG // CyqGSIb3DQEJEAEEMC8GCSqGSIb3DQEJBDEiBCC9k0uZ
+// SIG // yyyWu5er9s36CFTdFDJqwcJgeKTMaUwLKI2uSzCB+gYL
 // SIG // KoZIhvcNAQkQAi8xgeowgecwgeQwgb0EIHvbPBIDlM+6
 // SIG // BsiJk7/YfWGuKwBUi3DMOxxvRaqKGOmFMIGYMIGApH4w
 // SIG // fDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0
@@ -388,12 +355,12 @@ server.on('upgrade', (req, socket, head) => {
 // SIG // cm9zb2Z0IFRpbWUtU3RhbXAgUENBIDIwMTACEzMAAAFH
 // SIG // nY/x5t4xg1kAAAAAAUcwIgQgWtxkW0d77T5UZNWWMYAr
 // SIG // 3OMPLU+7HEvnXpmle/Xhw0cwDQYJKoZIhvcNAQELBQAE
-// SIG // ggEAOVGWWhX+2iid7jZpHs1DCIbFaXmaMfkhRhg15sdZ
-// SIG // ZjX/RyOMmd+IbMQLiYfCla05uidyAZxFJH6oKM1YWPGO
-// SIG // R4AkCKepA0rBk7hVFCrGamT2easCW1ri9iyTQ+ByKfCG
-// SIG // VfD5CfE9xAFIb8NGzABpRE0dT6Nvtq/MLqxXn9GhPS+4
-// SIG // LGi5gV6hOHwbQOGLZENczj1/FKeA06963twvaviAlfm7
-// SIG // 7DA7iid80n5yaRMDiXS6aekE4BG5j9TljmGXaeHN8tQ/
-// SIG // XYsKtwr0b+PMMKO+JwKBbXx7Rfn5EJTnw/a9BBTJH+Ft
-// SIG // Au1xfGTDm/BwUAER+rxNdHdkXjYXo5mFF702yw==
+// SIG // ggEAMfr5QZErd2RcTT/PAcjVfQi8g6V7DbQaHL1TYF/d
+// SIG // L7biBfHnLfRwOzzt/EvLScTVi+zWG0fkD9Gg7OVO+TAk
+// SIG // k9RmJtBdg6bwR8z0QJiq7mgmjfXgPVvZStmG1zwece5D
+// SIG // SI5FgzNqA0D6rbkYmdzEmL3kAsu8a8MUsl2LTtPy9zr4
+// SIG // 3YOUp6855NjDCSGJb88BW3QIp5eXA7rUF7SsiSUX3K1R
+// SIG // 6SaIPyBiwtK+AQ9qlenWM2cW5xsKFmVnaueAdjN4pf9o
+// SIG // jjreaeq9LurGWcB8YtOuczFWHdVc0AFOujl4gsRJ7eNT
+// SIG // TpjVdD9flCD2fx5aa+eu1zbkPey+OqBuggSozQ==
 // SIG // End signature block
