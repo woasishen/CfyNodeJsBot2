@@ -67,10 +67,17 @@ server.post('/api/messages', (req, res) => {
     });
 });
 
+var siteName =  process.env.APPSETTING_WEBSITE_SITE_NAME;
+var pipeName = "bfv4.pipes";
+if (siteName)
+{
+    pipeName = siteName + ".directline";
+}
+
 adapter.useNamedPipe(async (context) => {
     await myBot.run(context);
     },
-    process.env.APPSETTING_WEBSITE_SITE_NAME + '.directline'
+    pipeName
 );
 
 // Listen for Upgrade requests for Streaming.
