@@ -76,6 +76,23 @@ server.post('/api/messages', async (req, res) => {
     await adapter.process(req, res, (context) => myBot.run(context));
 });
 
+var siteName =  process.env.APPSETTING_WEBSITE_SITE_NAME;
+var pipeName = "bfv4.pipes";
+if (siteName)
+{
+    pipeName = siteName + ".directline";
+}
+
+adapter.connectNamedPipe(
+    pipeName,
+    async (context) => {
+        await myBot.run(context);
+    },
+    process.env.MicrosoftAppId,
+    "testAudience"
+);
+
+
 // Listen for Upgrade requests for Streaming.
 server.on('upgrade', async (req, socket, head) => {
     // Create an adapter scoped to this WebSocket connection to allow storing session data.
